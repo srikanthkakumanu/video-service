@@ -1,2 +1,2 @@
-# kong-ag
-API Gateway examples by using Kong API Management
+# video-service
+A basic micro-service for videos
