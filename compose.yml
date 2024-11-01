@@ -38,12 +38,12 @@ services:
       - mariadb
       - phpmyadmin
     ports:
-      - "9103:9103"
+      - "9121:9121"
     environment:
       - SPRING_DATASOURCE_USERNAME=theuser
       - SPRING_DATASOURCE_PASSWORD=theuser
       - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb:3306/videodb?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=validate
+      - SPRING_JPA_HIBERNATE_DDL_AUTO=create
 
 
 volumes:
