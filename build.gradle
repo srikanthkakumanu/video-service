@@ -1,0 +1,83 @@
+plugins {
+	id 'java'
+	id 'org.springframework.boot' version '3.4.0'
+	id 'io.spring.dependency-management' version '1.1.6'
+}
+
+group = 'video-service'
+version = '1.0'
+description = 'A micro-service for video module/domain'
+
+java {
+	sourceCompatibility = '21'
+}
+
+ext {
+	OPEN_API_VERSION = '2.6.0'
+	LOGSTASH_LOGBACK_ENCODER_VERSION = '8.0'
+	MAPSTRUCT_VERSION = '1.6.2'
+	MAPSTRUCT_LOMBOK_BINDING_VERSION = '0.2.0'
+	set('springCloudVersion', "2024.0.0")
+}
+
+configurations {
+	compileOnly {
+		extendsFrom annotationProcessor
+	}
+}
+
+repositories {
+	mavenLocal()
+	mavenCentral()
+	google()
+}
+
+dependencies {
+	implementation 'org.springframework.boot:spring-boot-starter-actuator'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+	implementation 'org.flywaydb:flyway-core'
+	implementation 'org.flywaydb:flyway-mysql'
+	compileOnly 'org.projectlombok:lombok'
+	annotationProcessor 'org.projectlombok:lombok'
+
+	implementation "org.mapstruct:mapstruct:${MAPSTRUCT_VERSION}"
+	annotationProcessor "org.projectlombok:lombok-mapstruct-binding:${MAPSTRUCT_LOMBOK_BINDING_VERSION}"
+	annotationProcessor "org.mapstruct:mapstruct-processor:${MAPSTRUCT_VERSION}"
+	implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${OPEN_API_VERSION}"
+
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
+	runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
+
+	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
+	}
+}
+
+bootJar {
+	archiveFileName = "${project.group}" + "-" + "${project.version}" + ".jar"
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+
+	testLogging {
+		events "passed", "skipped", "failed" //, "standardOut", "standardError"
+
+		showExceptions true
+		exceptionFormat "full"
+		showCauses true
+		showStackTraces true
+
+		// Change to `true` for more verbose test output
+		showStandardStreams = false
+	}
+}
