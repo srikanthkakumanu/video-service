@@ -34,6 +34,12 @@ public class VideosController {
         this.service = service;
     }
 
+    @GetMapping("/ping")
+    public ResponseEntity<?> ping() {
+        log.debug("Ping request received");
+        return ResponseEntity.ok("pong");
+    }
+
     @GetMapping
     @Operation(summary = "Retrieve All videos (Paginated)", description = "Retrieve a paginated list of all available videos in the system.")
     @ApiResponses({
