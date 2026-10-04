@@ -1,4 +1,4 @@
-FROM eclipse-temurin:21-jre-alpine AS jre-build
+FROM eclipse-temurin:27-jre-alpine AS jre-build
 LABEL authors="skakumanu"
 # Add a group and user to run the application as a non-root user
 RUN addgroup -S srikanth-group && adduser -S srikanth -G srikanth-group
@@ -14,7 +14,7 @@ ADD ${JAR_FILE_LOCATION}/${JAR_FILE} ./
 RUN java -Djarmode=layertools -jar ${JAR_FILE} extract
 
 
-FROM eclipse-temurin:21-jre-alpine
+FROM eclipse-temurin:27-jre-alpine
 
 WORKDIR application
 CMD apt-get update -y

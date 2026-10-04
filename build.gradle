@@ -1,23 +1,37 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '3.4.4'
+	id 'org.springframework.boot' version '4.1.1'
 	id 'io.spring.dependency-management' version '1.1.7'
+	//id 'org.graalvm.buildtools.native' version '0.10.2'
 }
 
 group = 'video-service'
 version = '1.0'
-description = 'A micro-service for video module/domain'
+description = 'A microservice for video metadata'
 
 java {
-	sourceCompatibility = '21'
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(27)
+	}
 }
 
+// For Spring Boot Actuator to show build information
+springBoot {
+	buildInfo()
+}
+
+repositories {
+	mavenCentral()
+}
+
+// Centralized dependency versions
 ext {
-	OPEN_API_VERSION = '2.8.5'
-	LOGSTASH_LOGBACK_ENCODER_VERSION = '8.0'
-	MAPSTRUCT_VERSION = '1.6.3'
-	MAPSTRUCT_LOMBOK_BINDING_VERSION = '0.2.0'
-	set('springCloudVersion', "2024.0.0")
+	set('springCloudVersion', "2025.1.3")
+	openApiVersion = '3.1.1'
+	logstashLogbackEncoderVersion = '8.0'
+	mapstructVersion = '1.6.3'
+	lombokVersion = '1.18.48'
+	mapstructLombokBindingVersion = '0.2.0'
 }
 
 configurations {
@@ -26,38 +40,51 @@ configurations {
 	}
 }
 
-repositories {
-	mavenLocal()
-	mavenCentral()
-	google()
-}
-
 dependencies {
+	implementation 'org.springframework.cloud:spring-cloud-starter-config'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
-	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-	implementation 'org.springframework.boot:spring-boot-starter-web'
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
+	implementation 'org.springframework.boot:spring-boot-starter-security'
+	implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-resource-server'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.springframework.cloud:spring-cloud-starter-vault-config'
+
+	// Spring Cloud for Service Discovery
 	implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
-	implementation 'org.flywaydb:flyway-core'
-	implementation 'org.flywaydb:flyway-mysql'
-	compileOnly 'org.projectlombok:lombok'
-	annotationProcessor 'org.projectlombok:lombok'
 
-	implementation "org.mapstruct:mapstruct:${MAPSTRUCT_VERSION}"
-	annotationProcessor "org.projectlombok:lombok-mapstruct-binding:${MAPSTRUCT_LOMBOK_BINDING_VERSION}"
-	annotationProcessor "org.mapstruct:mapstruct-processor:${MAPSTRUCT_VERSION}"
-	implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${OPEN_API_VERSION}"
+	// Database & Migrations
+	implementation 'org.flywaydb:flyway-database-postgresql'
+	runtimeOnly 'org.postgresql:postgresql'
 
+	// API Documentation
+	implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${openApiVersion}"
+
+	// Logging
+	implementation "net.logstash.logback:logstash-logback-encoder:${logstashLogbackEncoderVersion}"
+
+	// Developer Tools
 	developmentOnly 'org.springframework.boot:spring-boot-devtools'
 	developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
-	runtimeOnly 'org.mariadb.jdbc:mariadb-java-client'
 
+// Code Generation & Mapping
+	compileOnly "org.projectlombok:lombok:${lombokVersion}"
+	annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
+	implementation "org.mapstruct:mapstruct:${mapstructVersion}"
+	annotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+	annotationProcessor "org.projectlombok:lombok-mapstruct-binding:${mapstructLombokBindingVersion}"
+
+	// Testing
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
-	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
-	testImplementation 'org.testcontainers:junit-jupiter'
-	testImplementation 'org.mockito:mockito-core'
-	testImplementation 'org.testcontainers:mariadb:1.20.6'
+	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+	testImplementation 'org.springframework.security:spring-security-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+	// 'spring-boot-starter-test' includes JUnit 5, Mockito, and AssertJ.
+	// No need for explicit 'junit-platform-launcher' or 'assertj-core' unless overriding versions.
 }
 
 dependencyManagement {
@@ -66,12 +93,9 @@ dependencyManagement {
 	}
 }
 
-bootJar {
-	archiveFileName = "${project.group}" + "-" + "${project.version}" + ".jar"
-}
-
-tasks.named('test') {
-	useJUnitPlatform()
+// This section provides detailed test output to the terminal, which is great for debugging.
+test {
+	useJUnitPlatform { excludeTags 'integration' }
 
 	testLogging {
 		events "passed", "skipped", "failed" //, "standardOut", "standardError"
@@ -85,3 +109,29 @@ tasks.named('test') {
 		showStandardStreams = false
 	}
 }
+
+tasks.register('integrationTest', Test) {
+	description = 'Validates PostgreSQL migrations and persistence adapters using Docker.'
+	group = 'verification'
+	testClassesDirs = sourceSets.test.output.classesDirs
+	classpath = sourceSets.test.runtimeClasspath
+	useJUnitPlatform { includeTags 'integration' }
+	shouldRunAfter test
+}
+
+
+/*
+// This is an example configuration for creating a performance-tuned Docker image
+// using Spring Boot's Paketo Buildpacks integration.
+bootBuildImage {
+	publish = true
+	// JVM performance tuned
+	environment = [
+		'BP_JVM_VERSION': '27',
+		'BP_JVM_TYPE': 'JRE',
+		'BPE_DELIM_JAVA_TOOL_OPTIONS': ' ',
+		'BPE_APPEND_JAVA_TOOL_OPTIONS': '-XX:+UseParallelGC -XX:GCTimeRatio=4 -XX:AdaptiveSizePolicyWeight=90 -XX:MinHeapFreeRatio=20 -XX:MaxHeapFreeRatio=40 -XX:+HeapDumpOnOutOfMemoryError -Xms512m -Xmx512m -Djava.security.egd=file:/dev/./urandom',
+		'BPE_JVM_THREAD_COUNT': '100'
+	]
+}
+*/

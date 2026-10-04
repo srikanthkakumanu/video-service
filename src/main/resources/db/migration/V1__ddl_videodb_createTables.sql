@@ -1,10 +1,11 @@
-create table tbl_video (
-    id varbinary(16) not null primary key,
-    title varchar(30) unique,
+CREATE TABLE tbl_video (
+    id uuid PRIMARY KEY,
+    title varchar(30) NOT NULL UNIQUE,
     description varchar(100),
-    user_id varbinary(16),
-    user_name varchar(20),
-    completed boolean default 0,
-    created timestamp,
-    updated timestamp
-) engine=InnoDB;
+    user_id uuid,
+    user_name varchar(255),
+    completed boolean NOT NULL DEFAULT false,
+    created timestamptz,
+    updated timestamptz
+);
+CREATE INDEX idx_tbl_video_user_id ON tbl_video(user_id);

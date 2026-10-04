@@ -1,69 +1,79 @@
 spring:
+  profiles.active: ${SPRING_ACTIVE_PROFILE:dev}
   application:
-    name: "${SPRING_APP_NAME:video-service}"
+    name: ${SPRING_APP_NAME:video-service}
+  config:
+    import:
+      - optional:vault://secret/data/db/videodb/${SPRING_ACTIVE_PROFILE:dev}
+      - optional:vault://secret/data/keycloak/${SPRING_ACTIVE_PROFILE:dev}
+      - optional:configserver:http://cloud-config-service:9311
+  devtools:
+    restart:
+      enabled: true
   threads:
     virtual:
       enabled: true
   jackson:
     mapper:
       accept-case-insensitive-properties: true
+  datasource:
+    username: ${user:theuser}
+    password: ${password:theuser}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/videodb}
   jpa:
     hibernate:
-      ddl-auto: create
+      ddl-auto: ${SPRING_JPA_HIBERNATE_DDL_AUTO:validate}
     defer-datasource-initialization: false
     properties:
       hibernate:
-        show_sql: true
-        format_sql: true
-    show-sql: true
-  sql:
-    init:
-      mode: always
-  datasource:
-    username: theuser
-    password: theuser
-    url: jdbc:mariadb://mariadb:3306/videodb?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
+        show_sql: ${SPRING_JPA_HIBERNATE_SHOW_SQL:false}
+        format_sql: ${SPRING_JPA_HIBERNATE_FORMAT_SQL:false}
   flyway:
-    userDomain: videoadmin
-    password: videoadmin
-    sql-migration-prefix: V
-    repeatable-sql-migration-prefix: R
-    sql-migration-separator: __
-    sql-migration-suffixes: .sql
-  doc:
-    api-docs:
-      path: /api-docs
-    swagger-ui:
-      operationsSorter: method
-    show-actuator: true
+    enabled: true
+    user: ${flw-user:videoadmin}
+    password: ${flw-password:videoadmin}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: ${KEYCLOAK_ISSUER_URI:${issuer-uri:http://localhost:8080/realms/company-platform}}
+  cloud:
+    vault:
+      host: ${VAULT_HOST:localhost}
+      port: ${VAULT_PORT:8200}
+      scheme: http
+      authentication: TOKEN
+      token: ${VAULT_TOKEN:srikanth}
+      kv:
+        enabled: true
+        backend: secret
+        profile-separator: /
 
 server:
-  port: 9141
+  port: ${SERVER_PORT:9141}
 
-apiKey: "apikey111,apikey222"
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    operationsSorter: method
+  show-actuator: true
 
 eureka:
   client:
     serviceUrl:
-      defaultZone: http://eureka-discovery-service:9111/eureka
-#  instance:
-#    preferIpAddress: true
-
-
-logging:
-  level:
-    userDomain: debug
-    org:
-      hibernate: ERROR
-      hibernate.type.descriptor.sql: trace
-  pattern:
-    level: "${LOGPATTERN_CONSOLE:%green(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %blue(-%5level) %red([%thread]) %magenta(---){faint} %yellow(%logger{15}) - %msg%n}"
+      defaultZone: ${EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE:http://eureka-discovery-service:9111/eureka}
+  instance:
+    instance-id: "${spring.application.name}:${spring.application.instance_id:${random.value}}"
 
 management:
   endpoints:
     web:
       exposure:
-        include: health, info, beans, env, metrics, auditevents, httptrace, loggers, threaddump
+        include: health,info,metrics,prometheus,loggers,threaddump
   endpoint:
     health:
       show-details: always
@@ -80,10 +90,13 @@ management:
     os:
       enabled: true
 
+logging:
+  level:
+    root: ${ROOT_LOG_LEVEL:info}
+    org.springframework.security: ${SPRING_SECURITY_LOG_LEVEL:info}
+  pattern:
+    level: ${LOG_PATTERN_CONSOLE:%green(%d{yyyy-MM-dd HH:mm:ss.SSS}){faint} %blue(-%5level) %red([%thread]) %magenta(---){faint} %yellow(%logger{15}) - %msg%n}
+
 info:
   app:
-    name: "${spring.application.name}"
-    #description: "Example Videos microservice"
-    #version: "1.0.0"
-    #author: "Srikanth"
-    #docs: "http://skakumanu.dev"
+    name: ${spring.application.name}

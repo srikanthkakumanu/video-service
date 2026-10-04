@@ -1,63 +1,29 @@
 # video-service
 
-A basic microservice for videos
+Video catalog metadata and completion APIs at `/api/videos`, served on port 9141. Uses Java 27, Spring Boot 4.1.1, Spring Cloud 2025.1.3, PostgreSQL/Flyway, MapStruct 1.6.3, and Keycloak resource-server security.
 
-### Run
+## Build And Run
 
----
-
-The following command builds an image and tags it as srikanthkakumanu/video-service and runs the Docker image locally. The build creates a spring user and spring group to run the application.
-
-``````bash
-
-docker build --build-arg JAR_FILE=build/libs/video-service-1.0.jar -t srikanthkakumanu/video-service .
-``````
-
-Run the application with user privileges helps to mitigate some risks. So, an important improvement to the Dockerfile is to run the application as a non-root user.
-
-### Build Docker Image
-
----
+Use this service's independent Gradle wrapper:
 
 ```bash
-
-./gradlew bootBuildImage --imageName=srikanthkakumanu/video-service
+./gradlew test
+./gradlew integrationTest
+./gradlew bootJar
+docker compose up -d postgres keycloak
+./gradlew bootRun
 ```
 
-or
+The integration tests require Docker and use an isolated PostgreSQL 18 database. When launching Gradle 8.14.3, use a Java 21 JAVA_HOME if Java 27 is unsupported by the wrapper runtime; the Java 27 project toolchain still compiles and runs tests.
 
-```bash
-docker build -t srikanthkakumanu/video-service:1.0 .
-```
+The Keycloak `company-platform` realm must be provisioned before JWT validation works. Default database credentials match the shared Vault convention: runtime `theuser/theuser`, migrations `videoadmin/videoadmin`. Override `SPRING_DATASOURCE_URL`, `KEYCLOAK_ISSUER_URI`, Vault settings and `SERVER_PORT` for your environment.
 
-### Push Docker Image to DockerHub
+## APIs And Authorization
 
----
+Authenticated users may read video metadata. Creating a video uses the JWT subject as owner for regular users. Updating, deleting and completing a video require ownership, ADMIN or MANAGER. Only managers may assign or transfer ownership. Completion is performed as a single transactional application use case.
 
-```bash
+Search: `/api/videos/filter?title=Example&completed=true`. Listing supports `page` and `size` (1 to 200). OpenAPI: `/api-docs`. Swagger: `/swagger-ui.html`. Health: `/actuator/health`. Send `Authorization: Bearer <token>` to protected endpoints.
 
-docker image push srikanthkakumanu/video-service:1.0
-```
+The framework-free domain and ports live under `domain`; transactions under `application/usecase`; JPA, HTTP compatibility DTO facades, mappers and security under `infrastructure`. Filters are applied in PostgreSQL rather than by loading the whole table into memory. Domain timestamps are UTC instants.
 
-### Using Spring Profiles
-
----
-
-```bash
-
-docker run -e "SPRING_PROFILES_ACTIVE=prod" -p 8080:8080 -t srikanthkakumanu/video-service
-```
-
-or
-
-```bash
-docker run -e "SPRING_PROFILES_ACTIVE=dev" -p 8080:8080 -t srikanthkakumanu/video-service
-```
-
-### Debug App in Docker container (using JPDA)
-
----
-
-```bash
-docker run -e "JAVA_TOOL_OPTIONS=-agentlib:jdwp=transport=dt_socket,address=5005,server=y,suspend=n" -p 8080:8080 -p 5005:5005 -t srikanthkakumanu/video-service
-```
+See `../IAM_IMPLEMENTATION_CHECKPOINT.md` for the full workspace migration state.

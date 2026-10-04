@@ -1,51 +1,64 @@
 services:
-
-  # MariaDB
-  mariadb:
-    image: mariadb:latest
+  postgres:
+    image: postgres:18
+    container_name: video-service-postgres
     restart: on-failure
     environment:
-      MARIADB_DATABASE: videodb
-      #      MARIADB_USER: root
-      #      MARIADB_PASSWORD: root
-      MARIADB_ROOT_PASSWORD: root
-    #    expose:
-    #      - 40000
+      POSTGRES_USER: root
+      POSTGRES_PASSWORD: root
+      POSTGRES_DB: postgres
     ports:
-      - 3306:3306
+      - "5432:5432"
     volumes:
-      - mariadb:/var/lib/mysql
+      - postgres:/var/lib/postgresql/data
+      - ../micro-services/postgres-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U root -d postgres" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # UI for MariaDB/MySQL
-  phpmyadmin:
-    image: phpmyadmin
-    restart: on-failure #always
-    expose:
-      - 40001
+  keycloak:
+    image: quay.io/keycloak/keycloak:latest
+    container_name: video-service-keycloak
+    restart: on-failure
+    command: start-dev
+    depends_on:
+      postgres:
+        condition: service_healthy
     ports:
-      - 40001:80
+      - "8080:8080"
     environment:
-      PMA_HOST: mariadb
-      PMA_PORT: 3306
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: theuser
+      KC_DB_PASSWORD: theuser
+      KC_HEALTH_ENABLED: true
 
-# video micro-service
   video-service:
-    image: srik1980/video-service:1.0
+    image: video-service:latest
     build:
       context: .
     container_name: video-service
     depends_on:
-      - mariadb
-      - phpmyadmin
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
     ports:
       - "9141:9141"
     environment:
-      - SPRING_DATASOURCE_USERNAME=theuser
-      - SPRING_DATASOURCE_PASSWORD=theuser
-      - SPRING_DATASOURCE_URL=jdbc:mariadb://mariadb:3306/videodb?useUnicode=true&characterEncoding=UTF-8&serverTimezone=UTC
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=create
-
+      SPRING_APP_NAME: video-service
+      SERVER_PORT: 9141
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/videodb
+      SPRING_JPA_HIBERNATE_DDL_AUTO: validate
+      SPRING_JPA_HIBERNATE_SHOW_SQL: false
+      SPRING_JPA_HIBERNATE_FORMAT_SQL: false
+      KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/company-platform
+      ROOT_LOG_LEVEL: info
 
 volumes:
-  mariadb:
+  postgres:
     driver: local
