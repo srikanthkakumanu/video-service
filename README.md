@@ -3,7 +3,7 @@
 Video Service maintains video catalog metadata, completed state, and ownership. Uploads, object storage, media streaming, transcoding, and playback are outside the current implementation.
 ## Technology
 
-Java 27, Spring Boot 4.1.1, Spring Cloud 2025.1.3, Gradle 8.14.3 (Groovy DSL, independent wrapper), MapStruct 1.6.3, Lombok 1.18.48, and springdoc-openapi 3.1.1. Spring Data JPA and Flyway provide PostgreSQL persistence.
+Java 27, Spring Boot 4.1.1, Spring Cloud 2025.1.3, Gradle 9.8.0 (Groovy DSL, independent checksum-verified wrapper), MapStruct 1.6.3, Lombok 1.18.48, and springdoc-openapi 3.1.1. Spring Data JPA and Flyway provide PostgreSQL persistence.
 
 These are checked-in versions. The platform's agreed target is Java 27 with a compatible current Spring ecosystem; version upgrades must remain coordinated rather than independently mixing release trains.
 ## Domain And Relationships
@@ -56,9 +56,26 @@ Run commands from this repository's root; do not use another service's Gradle wr
 bash ./gradlew clean test bootJar
 ```
 
-The application JAR is written to `build/libs/`. Dockerfiles consume that JAR, so build it before building an image. Java 27 is the target toolchain for migrated services. The current Gradle 8.x wrapper may need a supported older JVM to launch Gradle while the configured toolchain compiles with Java 27; do not assume Gradle itself can run on JDK 27.
+The application JAR is written to `build/libs/`. Dockerfiles consume that JAR, so build it before building an image. Set JAVA_HOME to Java 27 to run this repository's Gradle 9.8.0 wrapper, compilation and tests.
 
-Container recipes use layered-JAR extraction. The complete Docker image/startup path still needs verification after the Spring Boot upgrade.
+The Dockerfile starts `build/libs/video-service-1.0.jar` directly on Temurin 27 as non-root `appuser:appgroup`, with container-aware heap sizing (`MaxRAMPercentage=75`) and curl readiness checks. Its restricted build context contains only the JAR, not local configuration, source or secrets. Set container memory limits and leave room for non-heap memory.
+
+```bash
+docker build -t video-service:latest .
+ruby bin/verify-image.rb
+```
+
+The repeatable smoke requires Docker Desktop (`host.docker.internal`) and Ruby with WEBrick/OpenSSL. It creates an isolated network and temporary PostgreSQL 18 with memory-backed data, initializes `root/root`, `videoadmin/videoadmin` and `theuser/theuser`, and supplies temporary RSA-signed JWTs via actual OIDC/JWKS decoding. Config/Vault imports and Eureka are disabled only for this smoke. Existing databases, volumes and realms are untouched; temporary containers and the network are cleaned up.
+
+Checks cover migrations/table ownership and runtime-role sessions, JWT signature/issuer/expiry rejection, public ping/probes, ADMIN-only JSON/YAML/Swagger/diagnostics, JWT-derived video ownership despite a spoofed body owner, denied cross-user deletion/completion and persisted owner completion. Actual JSON and YAML contracts declare HTTP `bearerAuth` with JWT format and global security requirements. Public ping/probe GET operations explicitly override those requirements; catalog GET retains bearer security. Infrastructure configuration tests cover exact public paths, unchanged non-GET/private operations and absent path documents. The image passes with a read-only root filesystem, writable `/tmp`, dropped capabilities, `no-new-privileges` and a 512 MiB limit.
+
+## Health Probes
+
+Standalone/shared Compose use `/actuator/health/readiness` on port 9161. Readiness includes `readinessState,db` because data APIs require PostgreSQL. Liveness checks application state only. Database failure returns readiness 503 while liveness remains 200; a shared database outage may make all instances unready, so callers/ingress must handle it. Anonymous probes hide components; ADMIN can inspect them.
+
+Pool acquisition defaults to 3000 ms (`SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT`), with 1000 ms validation, to keep ordinary database-unavailable checks within the 5-second probe timeout. Hung network queries still need driver/network timeout policy. Readiness does not prove Config/Vault/Keycloak/Eureka availability.
+
+This increment is not company-platform Keycloak/audience validation, DB recovery, shared configuration/discovery, concurrent-write safety, production load or full-platform acceptance.
 ## Tests
 
 ```bash
@@ -66,7 +83,7 @@ bash ./gradlew test
 bash ./gradlew integrationTest
 ```
 
-PostgreSQL integration tests require Docker/Testcontainers. The checkpoint records six unit/MVC tests, one PostgreSQL integration test, and successful `bootJar` verification. Port configuration was also checked separately; a complete container-platform smoke test is still pending.
+PostgreSQL integration tests require Docker/Testcontainers. Current verification covers 17 unit/MVC/configuration tests, one PostgreSQL integration test and `bootJar`, plus the separate real container smoke above. Full-platform acceptance remains pending; compatibility warnings and exact evidence are recorded in the checkpoint.
 ## Run Locally
 
 Choose shared dependencies (PostgreSQL 5432 / Keycloak 8080) or service-local dependencies (35432 / 38080), not both API instances on the same port. The following starts the JVM against service-local dependencies; start PostgreSQL and configure the Keycloak realm first.
@@ -100,7 +117,7 @@ Flyway V1 is a fresh PostgreSQL schema baseline, not an in-place migration of an
 
 ## Operations And Remaining Work
 
-Check `/actuator/health` and the public ping endpoint for connectivity. OpenAPI is configured at `/api-docs` and Swagger UI at `/swagger-ui.html`. A healthy process alone does not verify issuer alignment, database permissions, or the end-to-end gateway path.
+Check GET `/actuator/health` and the public ping endpoint for connectivity. OpenAPI is configured at `/api-docs` and Swagger UI at `/swagger-ui.html`; documentation and non-health Actuator endpoints require ADMIN. Health details are shown only to authorized administrators. A healthy process alone does not verify issuer alignment, database permissions, or the end-to-end gateway path.
 
 Fine-grained Auth Service enforcement, cross-service lifecycle events, optimistic concurrency, production deployment hardening, and full-platform smoke verification remain pending. Existing resource representations are retained for compatibility.
 
@@ -123,7 +140,7 @@ Request flow:
 
 ```text
 HTTP /api/videos...
-  -> SecurityConfig validates Keycloak JWT except public ping/docs/health
+  -> SecurityConfig validates Keycloak JWT except GET public ping/health; docs/diagnostics require ADMIN
   -> VideosController maps DTOs
   -> VideoService facade resolves VideoActor
   -> VideoCatalogService applies ownership and manager/admin rules
@@ -138,6 +155,7 @@ HTTP /api/videos...
 | `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/videodb` unless overridden |
 | `user` / `password` | Runtime DB credentials from Vault-style placeholders; local fallback `theuser` |
 | `flw-user` / `flw-password` | Flyway credentials; local fallback `videoadmin` |
+| `SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT` | Pool acquisition timeout in milliseconds, default `3000` |
 | `KEYCLOAK_ISSUER_URI` / `issuer-uri` | JWT issuer; must match token `iss` |
 | `VAULT_HOST`, `VAULT_PORT`, `VAULT_TOKEN` | Vault integration |
 | `EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE` | Registry URL |
@@ -171,3 +189,16 @@ curl -H "Authorization: Bearer $ACCESS_TOKEN" \
 | `404` | Requested video ID does not exist. |
 | Duplicate title failure | `tbl_video.title` is unique. |
 | Startup fails before DB access | Vault/Config import is unreachable; disable clients for local standalone runs or start dependencies. |
+
+
+## JWT Audience Contract
+
+Spring Boot's managed JWT decoder requires the configured issuer and the audience `company-platform-api`. Override the audience with `KEYCLOAK_API_AUDIENCE` when running locally against a different API client. A correctly signed token with a missing or different `aud` claim returns HTTP 401; realm roles do not bypass audience validation.
+
+`ruby bin/verify-image.rb` checks the actual packaged application's RSA/JWKS decoder with accepted, missing and incorrect audiences, while retaining catalog, ownership, documentation and probe checks. These checks use a controlled local issuer, not genuine Keycloak realm acceptance.
+
+## Repository CI
+
+[Build workflow](.github/workflows/build.yml) runs independently on pushes, pull requests and manual dispatch with Temurin Java 27 on Ubuntu 24.04. It verifies this repository's wrapper JAR and Gradle distribution checksum, runs `check integrationTest bootJar` with fresh tasks and Gradle deprecations treated as failures, builds the service image and retains test reports for seven days. Actions are pinned to verified commit SHAs; permissions are read-only and checkout credentials are not persisted.
+
+PostgreSQL integration tests use Docker/Testcontainers; no production database or platform credentials are required. The workflow definition passes local actionlint/structural checks, but has not run on GitHub while these changes remain uncommitted/unpushed. Image building in CI does not replace the separate runtime/probe smoke evidence recorded in the checkpoint.

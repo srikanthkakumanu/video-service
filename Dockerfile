@@ -1,26 +1,9 @@
-FROM eclipse-temurin:27-jre-alpine AS jre-build
-LABEL authors="skakumanu"
-# Add a group and user to run the application as a non-root user
-RUN addgroup -S srikanth-group && adduser -S srikanth -G srikanth-group
-USER srikanth:srikanth-group
-WORKDIR application
-
-ARG PROJECT_NAME=video-service
-ARG PROJECT_VERSION=1.0
-ARG JAR_FILE_LOCATION=build/libs
-ARG JAR_FILE=${PROJECT_NAME}-${PROJECT_VERSION}.jar
-
-ADD ${JAR_FILE_LOCATION}/${JAR_FILE} ./
-RUN java -Djarmode=layertools -jar ${JAR_FILE} extract
-
-
 FROM eclipse-temurin:27-jre-alpine
-
-WORKDIR application
-CMD apt-get update -y
-
-COPY --from=jre-build application/dependencies/ ./
-COPY --from=jre-build application/spring-boot-loader/ ./
-COPY --from=jre-build application/snapshot-dependencies/ ./
-COPY --from=jre-build application/application/ ./
-ENTRYPOINT ["java", "-XX:+UseParallelGC", "-XX:GCTimeRatio=4", "-XX:AdaptiveSizePolicyWeight=90", "-XX:MinHeapFreeRatio=20", "-XX:MaxHeapFreeRatio=40", "-XX:+HeapDumpOnOutOfMemoryError", "-Xms512m", "-Xmx512m", "-Djava.security.egd=file:/dev/./urandom", "org.springframework.boot.loader.launch.JarLauncher"]
+LABEL authors="skakumanu"
+RUN apk add --no-cache curl && addgroup -S appgroup && adduser -S appuser -G appgroup
+WORKDIR /application
+COPY --chown=appuser:appgroup build/libs/video-service-1.0.jar application.jar
+USER appuser:appgroup
+EXPOSE 9161
+HEALTHCHECK --interval=10s --timeout=5s --start-period=60s --retries=5 CMD curl --fail --silent http://localhost:9161/actuator/health/readiness || exit 1
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "application.jar"]

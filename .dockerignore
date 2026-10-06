@@ -1,0 +1,4 @@
+**
+!build/
+!build/libs/
+!build/libs/video-service-1.0.jar

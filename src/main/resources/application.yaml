@@ -6,7 +6,7 @@ spring:
     import:
       - optional:vault://secret/data/db/videodb/${SPRING_ACTIVE_PROFILE:dev}
       - optional:vault://secret/data/keycloak/${SPRING_ACTIVE_PROFILE:dev}
-      - optional:configserver:http://cloud-config-service:9311
+      - optional:configserver:${CONFIG_SERVER_URL:http://cloud-config-service:9311/config}
   devtools:
     restart:
       enabled: true
@@ -17,6 +17,9 @@ spring:
     mapper:
       accept-case-insensitive-properties: true
   datasource:
+    hikari:
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:3000}
+      validation-timeout: 1000
     username: ${user:theuser}
     password: ${password:theuser}
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/videodb}
@@ -39,6 +42,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
+          audiences: ${KEYCLOAK_API_AUDIENCE:company-platform-api}
           issuer-uri: ${KEYCLOAK_ISSUER_URI:${issuer-uri:http://localhost:8080/realms/company-platform}}
   cloud:
     vault:
@@ -76,7 +80,13 @@ management:
         include: health,info,metrics,prometheus,loggers,threaddump
   endpoint:
     health:
-      show-details: always
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,db
+      show-details: when_authorized
+      roles: ADMIN
   info:
     env:
       enabled: true

@@ -10,8 +10,8 @@ services:
     ports:
       - "${VIDEO_DB_HOST_PORT:-35432}:5432"
     volumes:
-      - postgres:/var/lib/postgresql/data
-      - ../micro-services/postgres-init:/docker-entrypoint-initdb.d
+      - postgres:/var/lib/postgresql
+      - ../micro-services/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U root -d postgres" ]
       interval: 10s
@@ -58,6 +58,12 @@ services:
       SPRING_JPA_HIBERNATE_FORMAT_SQL: false
       KEYCLOAK_ISSUER_URI: http://keycloak:8080/realms/company-platform
       ROOT_LOG_LEVEL: info
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9161/actuator/health/readiness" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
 volumes:
   postgres:

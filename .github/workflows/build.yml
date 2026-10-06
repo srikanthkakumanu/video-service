@@ -1,0 +1,53 @@
+name: Java 27 Build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Verify independent wrapper
+        shell: bash
+        run: |
+          printf '%s  %s\n' '238e777fcddd7e34f9708186085def2abd6e08e658505b38718d79d74c21abd5' 'gradle/wrapper/gradle-wrapper.jar' | sha256sum --check
+          grep -Fx 'distributionSha256Sum=bafd5ce9cfaea0fbccfdc8439a1ac42fbd4cd9c89dc9a988228d8a2639a58e6c' gradle/wrapper/gradle-wrapper.properties
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: '27'
+          cache: gradle
+          cache-dependency-path: |
+            build.gradle
+            settings.gradle
+            gradle/wrapper/gradle-wrapper.properties
+      - name: Verify Java and Docker
+        run: |
+          java --version
+          docker info
+      - name: Tests and executable JAR
+        run: ./gradlew check integrationTest bootJar --rerun-tasks --no-daemon --warning-mode fail
+      - name: Build service image
+        run: docker build --tag video-service:ci .
+      - name: Publish test reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: test-reports
+          path: |
+            build/reports/tests/
+            build/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
