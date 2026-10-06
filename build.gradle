@@ -1,137 +1,105 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '4.1.1'
-	id 'io.spring.dependency-management' version '1.1.7'
-	//id 'org.graalvm.buildtools.native' version '0.10.2'
+	id 'jacoco'
+	alias(libs.plugins.spring.boot)
+	alias(libs.plugins.spring.dependency.management)
 }
 
-group = 'video-service'
-version = '1.0'
-description = 'A microservice for video metadata'
+group = 'com.videos'
+version = '1.0.0'
+description = 'Video context: videos, their completion state and who owns them'
 
 java {
 	toolchain {
-		languageVersion = JavaLanguageVersion.of(27)
+		languageVersion = JavaLanguageVersion.of(libs.versions.java.get() as int)
 	}
-}
-
-// For Spring Boot Actuator to show build information
-springBoot {
-	buildInfo()
 }
 
 repositories {
 	mavenCentral()
 }
 
-// Centralized dependency versions
-ext {
-	set('springCloudVersion', "2025.1.3")
-	openApiVersion = '3.1.1'
-	logstashLogbackEncoderVersion = '8.0'
-	mapstructVersion = '1.6.3'
-	lombokVersion = '1.18.48'
-	mapstructLombokBindingVersion = '0.2.0'
-}
-
-configurations {
-	compileOnly {
-		extendsFrom annotationProcessor
+dependencyManagement {
+	imports {
+		mavenBom libs.spring.cloud.dependencies.get().toString()
 	}
 }
 
 dependencies {
-	implementation 'org.springframework.cloud:spring-cloud-starter-config'
+	implementation libs.platform.security.starter
+	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+	implementation 'org.springframework.boot:spring-boot-starter-validation'
+	implementation 'org.springframework.boot:spring-boot-starter-restclient'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
-	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-security-oauth2-resource-server'
-	implementation 'org.springframework.boot:spring-boot-starter-validation'
-	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
-	implementation 'org.springframework.cloud:spring-cloud-starter-vault-config'
-
-	// Spring Cloud for Service Discovery
-	implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
-
-	// Database & Migrations
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-flyway'
 	implementation 'org.flywaydb:flyway-database-postgresql'
+	implementation 'org.springframework.cloud:spring-cloud-starter-config'
+	implementation 'org.springframework.cloud:spring-cloud-starter-vault-config'
+	implementation 'org.springframework.cloud:spring-cloud-starter-netflix-eureka-client'
+	implementation libs.springdoc.webmvc.ui
 	runtimeOnly 'org.postgresql:postgresql'
 
-	// API Documentation
-	implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${openApiVersion}"
-
-	// Logging
-	implementation "net.logstash.logback:logstash-logback-encoder:${logstashLogbackEncoderVersion}"
-
-	// Developer Tools
-	developmentOnly 'org.springframework.boot:spring-boot-devtools'
-	developmentOnly 'org.springframework.boot:spring-boot-docker-compose'
-
-// Code Generation & Mapping
-	compileOnly "org.projectlombok:lombok:${lombokVersion}"
-	annotationProcessor "org.projectlombok:lombok:${lombokVersion}"
-	implementation "org.mapstruct:mapstruct:${mapstructVersion}"
-	annotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
-	annotationProcessor "org.projectlombok:lombok-mapstruct-binding:${mapstructLombokBindingVersion}"
-
-	// Testing
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
-	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	testImplementation 'org.springframework.boot:spring-boot-starter-security-test'
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
-	testImplementation 'org.springframework.security:spring-security-test'
+	testImplementation 'org.testcontainers:testcontainers-postgresql'
+	testImplementation libs.nimbus.jose.jwt
+	testImplementation libs.archunit.junit5
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
-	// 'spring-boot-starter-test' includes JUnit 5, Mockito, and AssertJ.
-	// No need for explicit 'junit-platform-launcher' or 'assertj-core' unless overriding versions.
 }
 
-dependencyManagement {
-	imports {
-		mavenBom "org.springframework.cloud:spring-cloud-dependencies:${springCloudVersion}"
-	}
+bootJar {
+	archiveFileName = 'application.jar'
 }
 
-// This section provides detailed test output to the terminal, which is great for debugging.
+jar {
+	enabled = false
+}
+
+jacoco {
+	toolVersion = libs.versions.jacoco.get()
+}
+
 test {
-	useJUnitPlatform { excludeTags 'integration' }
+	useJUnitPlatform()
+	// Tests configure everything themselves; no config server, Vault or registry is involved.
+	systemProperty 'spring.cloud.config.enabled', 'false'
+	systemProperty 'spring.cloud.vault.enabled', 'false'
+	systemProperty 'eureka.client.enabled', 'false'
+	finalizedBy jacocoTestReport
+}
 
-	testLogging {
-		events "passed", "skipped", "failed" //, "standardOut", "standardError"
-
-		showExceptions = true
-		exceptionFormat = "full"
-		showCauses = true
-		showStackTraces = true
-
-		// Change to `true` for more verbose test output
-		showStandardStreams = false
+jacocoTestReport {
+	dependsOn test
+	reports {
+		xml.required = true
+		csv.required = true
 	}
 }
 
-tasks.register('integrationTest', Test) {
-	description = 'Validates PostgreSQL migrations and persistence adapters using Docker.'
-	group = 'verification'
-	testClassesDirs = sourceSets.test.output.classesDirs
-	classpath = sourceSets.test.runtimeClasspath
-	useJUnitPlatform { includeTags 'integration' }
-	shouldRunAfter test
+// The domain and application layers carry the rules; they must stay at or above 80% line coverage.
+jacocoTestCoverageVerification {
+	dependsOn test
+	violationRules {
+		rule {
+			element = 'BUNDLE'
+			limit {
+				counter = 'LINE'
+				minimum = 0.80
+			}
+		}
+	}
+	classDirectories.setFrom(files(sourceSets.main.output.classesDirs.collect {
+		fileTree(dir: it, includes: ['com/videos/domain/**', 'com/videos/application/**'])
+	}))
 }
 
-
-/*
-// This is an example configuration for creating a performance-tuned Docker image
-// using Spring Boot's Paketo Buildpacks integration.
-bootBuildImage {
-	publish = true
-	// JVM performance tuned
-	environment = [
-		'BP_JVM_VERSION': '27',
-		'BP_JVM_TYPE': 'JRE',
-		'BPE_DELIM_JAVA_TOOL_OPTIONS': ' ',
-		'BPE_APPEND_JAVA_TOOL_OPTIONS': '-XX:+UseParallelGC -XX:GCTimeRatio=4 -XX:AdaptiveSizePolicyWeight=90 -XX:MinHeapFreeRatio=20 -XX:MaxHeapFreeRatio=40 -XX:+HeapDumpOnOutOfMemoryError -Xms512m -Xmx512m -Djava.security.egd=file:/dev/./urandom',
-		'BPE_JVM_THREAD_COUNT': '100'
-	]
+check {
+	dependsOn jacocoTestCoverageVerification
 }
-*/

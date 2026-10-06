@@ -1,0 +1,104 @@
+{
+  "videos": [
+    {
+      "id": "97ee24dd-3a1c-52a9-86e3-573efdb8f9bd",
+      "title": "Getting Started with Java",
+      "description": "A first program, the JDK and how to run code."
+    },
+    {
+      "id": "869b2838-123a-5919-becf-2bbb1feb35f5",
+      "title": "Spring Boot in One Hour",
+      "description": "From an empty folder to a running REST service."
+    },
+    {
+      "id": "937b40d9-31f6-5db2-b75f-22269c93025b",
+      "title": "REST API Design Basics",
+      "description": "Resources, status codes and error formats."
+    },
+    {
+      "id": "270ee549-267b-595e-8ad0-49f5ba3ffd35",
+      "title": "Clean Architecture Explained",
+      "description": "Layers, ports and why dependencies point inward."
+    },
+    {
+      "id": "d5985a52-1107-539f-a47c-6cdd06aa3a2e",
+      "title": "Domain-Driven Design Intro",
+      "description": "Aggregates, value objects and ubiquitous language."
+    },
+    {
+      "id": "b45e0113-0f6e-5587-bd61-3cba4604ea8e",
+      "title": "PostgreSQL for Developers",
+      "description": "Tables, indexes, constraints and query plans."
+    },
+    {
+      "id": "ff2e168a-5843-58d9-81e0-7f04c2ea6484",
+      "title": "Flyway Migrations",
+      "description": "Versioned schema changes that run at startup."
+    },
+    {
+      "id": "763cc9b5-eb33-511b-ad76-73cc2dfec19e",
+      "title": "OAuth 2 and OpenID Connect",
+      "description": "Tokens, flows and what each one is for."
+    },
+    {
+      "id": "fb7949ee-0843-5980-ae67-93dc28cc33c4",
+      "title": "JWT Validation Step by Step",
+      "description": "Signature, issuer, audience and expiry checks."
+    },
+    {
+      "id": "909327e7-ef01-5a28-b279-dbc54b862c73",
+      "title": "Keycloak Roles and Groups",
+      "description": "How roles, composites and groups fit together."
+    },
+    {
+      "id": "d5a84356-b044-5da6-a71e-2528774424df",
+      "title": "Secrets with Vault",
+      "description": "Storing credentials and reading them at startup."
+    },
+    {
+      "id": "a9d2fd73-f414-571f-9612-9d0930afb8d8",
+      "title": "Docker for Java Services",
+      "description": "Multi-stage builds, small images and health checks."
+    },
+    {
+      "id": "63b33c3e-08c8-56de-88a0-ab92fd29c185",
+      "title": "Docker Compose Basics",
+      "description": "Running several containers that depend on each other."
+    },
+    {
+      "id": "61ff8e41-47db-5d1f-95be-b245c812698c",
+      "title": "Kubernetes First Steps",
+      "description": "Pods, deployments, services and probes."
+    },
+    {
+      "id": "ff9595ce-41a1-5789-aed5-c3580595d994",
+      "title": "Service Discovery",
+      "description": "How services find each other through a registry."
+    },
+    {
+      "id": "a7b1d2e0-596b-5ac9-972e-aecfe422fbd2",
+      "title": "API Gateway Patterns",
+      "description": "Routing, token relay and a single entry point."
+    },
+    {
+      "id": "25def8e2-49d3-53b3-b869-73f0d9ef7df0",
+      "title": "Testing with Testcontainers",
+      "description": "Integration tests against real databases."
+    },
+    {
+      "id": "862553d2-34bc-5ab3-87f2-3df4306bd88a",
+      "title": "Architecture Tests",
+      "description": "Keeping layering rules honest with ArchUnit."
+    },
+    {
+      "id": "3e3b7f85-84e9-503e-ab16-ea8a88655849",
+      "title": "Graceful Shutdown",
+      "description": "Finishing requests in flight before a stop."
+    },
+    {
+      "id": "283a3051-fa5c-50e9-9104-b15bac94e380",
+      "title": "Reading a Stack Trace",
+      "description": "Finding the line that matters in a long error."
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+# Common to every environment. Environment-specific settings are in application-dev.yml,
+# application-qa.yml and application-prod.yml; with no profile set, dev is used.
+spring:
+  application:
+    name: video-service
+  profiles:
+    default: dev
+  lifecycle:
+    # How long in-flight requests get to finish; the container is given longer than this.
+    timeout-per-shutdown-phase: 30s
+  cloud:
+    vault:
+      kv:
+        enabled: true
+        backend: secret
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${SERVER_PORT:9161}
+  # On stop, finish the requests in flight instead of dropping them.
+  shutdown: graceful
+
+platform:
+  keycloak:
+    client-id: video-service
+  security:
+    jwt:
+      audience: video-service
+  directory:
+    client-id: ${platform.keycloak.client-id}
+    # Written to Vault at secret/clients/video-service by auth-service; never in a file.
+    client-secret: ${client-secret:}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html

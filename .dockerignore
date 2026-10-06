@@ -1,4 +1,6 @@
-**
-!build/
-!build/libs/
-!build/libs/video-service-1.0.jar
+.git
+.gradle
+build
+bin
+.idea
+.vscode

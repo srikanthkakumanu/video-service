@@ -1,0 +1,17 @@
+# Development. Defaults suit running on the host against the local stack; Compose and the
+# Kubernetes dev overlay set the variables to their in-network addresses.
+spring:
+  config:
+    # Non-secret settings come from the config server, secrets straight from Vault: database
+    # credentials from secret/video-service, the client secret from secret/clients/video-service.
+    import:
+      - optional:configserver:${CONFIG_SERVER_URL:http://localhost:9311}
+      - optional:vault://
+      - optional:vault://secret/clients/video-service
+  cloud:
+    config:
+      # Lets the config server's Vault backend resolve this service's secrets as well.
+      token: ${VAULT_TOKEN:}
+    vault:
+      uri: ${VAULT_URI:http://localhost:8200}
+      token: ${VAULT_TOKEN:}

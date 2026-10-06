@@ -1,0 +1,14 @@
+# qa. The config server and Vault are required and their addresses must be supplied; nothing
+# here falls back to a development value.
+spring:
+  config:
+    import:
+      - configserver:${CONFIG_SERVER_URL}
+      - vault://
+      - vault://secret/clients/video-service
+  cloud:
+    config:
+      token: ${VAULT_TOKEN}
+    vault:
+      uri: ${VAULT_URI}
+      token: ${VAULT_TOKEN}

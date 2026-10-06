@@ -1,0 +1,12 @@
+package com.videos.infrastructure.persistence;
+
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+
+interface SpringDataVideoRepository extends JpaRepository<VideoJpaEntity, UUID>, JpaSpecificationExecutor<VideoJpaEntity> {
+
+	Optional<VideoJpaEntity> findByTitle(String title);
+}

@@ -15,9 +15,20 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: video-service
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          path: video-service
+          persist-credentials: false
+      # The build takes its version catalog and the shared security starter from the platform
+      # root, which must sit next to this repository.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: srikanthkakumanu/micro-services
+          path: micro-services
           persist-credentials: false
       - name: Verify independent wrapper
         shell: bash
@@ -30,24 +41,26 @@ jobs:
           java-version: '27'
           cache: gradle
           cache-dependency-path: |
-            build.gradle
-            settings.gradle
-            gradle/wrapper/gradle-wrapper.properties
+            video-service/build.gradle
+            video-service/settings.gradle
+            video-service/gradle/wrapper/gradle-wrapper.properties
+            micro-services/gradle/libs.versions.toml
       - name: Verify Java and Docker
         run: |
           java --version
           docker info
-      - name: Tests and executable JAR
-        run: ./gradlew check integrationTest bootJar --rerun-tasks --no-daemon --warning-mode fail
+      # Unit, slice and Testcontainers tests, the architecture rules and the coverage gate.
+      - name: Build and test
+        run: ./gradlew build --no-daemon
       - name: Build service image
-        run: docker build --tag video-service:ci .
+        run: docker build --build-context platform=../micro-services --tag video-service:ci .
       - name: Publish test reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: test-reports
           path: |
-            build/reports/tests/
-            build/test-results/
+            video-service/build/reports/tests/
+            video-service/build/test-results/
           if-no-files-found: ignore
           retention-days: 7
