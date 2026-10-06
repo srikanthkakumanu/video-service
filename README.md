@@ -1,204 +1,250 @@
-# Video Service
+# video-service
 
-Video Service maintains video catalog metadata, completed state, and ownership. Uploads, object storage, media streaming, transcoding, and playback are outside the current implementation.
-## Technology
+The video context of the platform: **videos, whether they are completed, and who owns them**. It stores metadata only; uploads, storage, streaming and playback are not part of it.
 
-Java 27, Spring Boot 4.1.1, Spring Cloud 2025.1.3, Gradle 9.8.0 (Groovy DSL, independent checksum-verified wrapper), MapStruct 1.6.3, Lombok 1.18.48, and springdoc-openapi 3.1.1. Spring Data JPA and Flyway provide PostgreSQL persistence.
+It is a business service on the identity platform and relies on that platform for everything about people:
 
-These are checked-in versions. The platform's agreed target is Java 27 with a compatible current Spring ecosystem; version upgrades must remain coordinated rather than independently mixing release trains.
-## Domain And Relationships
+- **Users** are the ones [`user-service`](../user-service/README.md) manages. This service stores no user data; a video only records the platform user ID of its owner.
+- **Login** happens at [`auth-service`](../auth-service/README.md). Nothing here is usable without a platform access token.
+- **Roles** are created and assigned in `auth-service`. This service defines none and checks only the permissions that arrive in the token.
 
-The plain-Java domain represents videos, actors, change commands, queries, and paging. Input/output ports connect transactional application use cases to infrastructure adapters. Infrastructure contains JPA entities/repositories, MapStruct persistence/HTTP mapping, controllers, security, and configuration.
+It is built the same way as [`books-service`](../books-service/README.md).
 
-PostgreSQL `videodb` owns this service's records. Keycloak provides JWT identity; Vault/Config Server and Eureka supply configuration/discovery when enabled. Fine-grained Auth Service decisions and gateway video routes are not implemented yet.
+## Contents
 
-Titles are required and limited to 30 characters; descriptions are limited to 100. UUID JWT subjects determine ownership. Authenticated reads expose a shared catalog, not an owner-private list. Ordinary users may mutate only owned videos; `ADMIN` or `MANAGER` may manage/transfer records. Completion changes execute through the transactional application use case.
+- [Who may do what](#who-may-do-what)
+- [API](#api)
+- [Errors](#errors)
+- [Rules the service enforces](#rules-the-service-enforces)
+- [Architecture](#architecture)
+- [Data](#data)
+- [Seed data](#seed-data)
+- [Configuration](#configuration)
+- [Dev users and passwords](#dev-users-and-passwords)
+- [Run](#run)
+- [Test](#test)
+- [Build and image](#build-and-image)
 
-## Ports
+## Who may do what
 
-| Endpoint | Shared platform | Local Compose |
+Being logged in is not enough: a caller needs a video role. A user with only the platform's default `USER` role gets `403`, and so does a user who only has a role for the book catalog.
+
+| Role (managed in auth-service) | Permissions in the token | May |
 | --- | --- | --- |
-| API | 9161 | 9161 |
-| PostgreSQL published port | 5432 | 35432 |
-| Keycloak published port | 8080 | 38080 |
+| `VIDEO_READER` | `videos:read` | read videos |
+| `VIDEO_EDITOR` | `videos:read`, `videos:write` | also add videos, and change, complete or remove their own |
+| `VIDEO_MANAGER` | `videos:read`, `videos:write`, `videos:manage` | also change or remove any video and transfer ownership |
+| `PLATFORM_ADMIN` | all three | everything |
 
-Override with `SERVER_PORT`, `VIDEO_DB_HOST_PORT`, and `VIDEO_KEYCLOAK_HOST_PORT`. Internal dependency ports remain 5432 and 8080. The former API default 9141 was corrected to avoid Auth Service.
+Give someone a role through the platform, never here:
+
+```bash
+curl -s -X POST localhost:9211/api/v1/users/$USER_ID/roles -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"roles":[{"name":"VIDEO_EDITOR"}]}'
+```
+
+The user's next token (after a refresh or a new login) carries the permissions. The roles, the permissions and the `video-service` client itself are created through the platform APIs by the onboarding job in [`micro-services`](../micro-services/README.md) (`onboarding/video-service.json`).
 
 ## API
 
-Base URL: `http://localhost:9161`.
+Base path `/api/v1/videos`. Reach it through the gateway (`http://localhost:9211`); the service itself listens on 9161. OpenAPI at `/v3/api-docs`, Swagger UI at `/swagger-ui.html` (off in `prod`).
 
-| Method | Path | Operation |
+Every call needs `Authorization: Bearer <access token>` from `POST /api/v1/auth/login`.
+
+| Method and path | Purpose | Needs |
 | --- | --- | --- |
-| GET | `/api/videos/ping` | Public connectivity |
-| GET | `/api/videos?page=0&size=10` | Paged list |
-| GET | `/api/videos/filter` | Filter by optional `id`, `title`, `completed` |
-| GET | `/api/videos/{id}` | Read video |
-| POST / PUT | `/api/videos` | Create / update using body ID |
-| PATCH | `/api/videos/{id}` | Mark completed; no request body |
-| DELETE | `/api/videos/{id}` | Delete owned/managed video |
+| `GET /api/v1/videos` | Search. Filters: `title` (contains, any case), `completed`, `ownerId`, `owner=me`. Paging: `page`, `size`, `sort`. | `videos:read` |
+| `GET /api/v1/videos/{id}` | Read a video | `videos:read` |
+| `POST /api/v1/videos` | Add a video. `201` with `Location`. It belongs to the caller; a manager may name another `ownerId`. | `videos:write` |
+| `PUT /api/v1/videos/{id}` | Replace its details | `videos:write`, and owner or `videos:manage` |
+| `POST /api/v1/videos/{id}/complete` | Mark it completed. No body. | `videos:write`, and owner or `videos:manage` |
+| `PUT /api/v1/videos/{id}/owner` | Give it to another active platform user: `{"ownerId": "..."}` | `videos:manage` |
+| `DELETE /api/v1/videos/{id}` | Remove it. `204`. | `videos:write`, and owner or `videos:manage` |
 
-Page sizes are limited to 1..200. Title filtering is case-insensitive and performed in the database. No matches returns an empty list with 200, not 404.
+```json
+// POST or PUT /api/v1/videos
+{"title": "Spring Boot in One Hour", "description": "From an empty folder to a running REST service.", "completed": false}
 
-The request record contains `id`, `title`, `description`, `userId`, `userName`, and `completed`. Ordinary callers cannot select another owner. Existing POST/PUT responses retain status 200 and legacy DTO metadata.
+// response
+{"id": "...", "title": "Spring Boot in One Hour", "description": "From an empty folder to a running REST service.",
+ "ownerId": "<platform user id or null>", "completed": false, "createdAt": "...", "updatedAt": "..."}
+```
+
+Lists return `items`, `total`, `page`, `size`. `page` starts at 0; `size` is 1 to 100 (default 20). `sort` is `field` or `field,asc|desc`, by `title` (default) or `createdAt`.
+
+The previous paths (`/api/videos`, `/api/videos/filter`, `PATCH /api/videos/{id}`, `/api/videos/ping`) are gone.
 
 ```bash
-curl -H "Authorization: Bearer $ACCESS_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"title":"Spring Workshop","description":"Watch later","completed":false}' \
-  http://localhost:9161/api/videos
-```
-## Build And Verification
+. ../micro-services/.env
+TOKEN=$(curl -s -X POST localhost:9211/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d "{\"username\":\"platform-admin\",\"password\":\"$PLATFORM_ADMIN_PASSWORD\"}" | jq -r .accessToken)
 
-Run commands from this repository's root; do not use another service's Gradle wrapper.
-
-```bash
-bash ./gradlew clean test bootJar
+curl -s "localhost:9211/api/v1/videos?size=3&sort=title" -H "Authorization: Bearer $TOKEN" | jq
 ```
 
-The application JAR is written to `build/libs/`. Dockerfiles consume that JAR, so build it before building an image. Set JAVA_HOME to Java 27 to run this repository's Gradle 9.8.0 wrapper, compilation and tests.
+## Errors
 
-The Dockerfile starts `build/libs/video-service-1.0.jar` directly on Temurin 27 as non-root `appuser:appgroup`, with container-aware heap sizing (`MaxRAMPercentage=75`) and curl readiness checks. Its restricted build context contains only the JAR, not local configuration, source or secrets. Set container memory limits and leave room for non-heap memory.
+Every error is an RFC 9457 problem (`application/problem+json`) with a stable `type` (`https://platform.local/problems/<code>`) and a matching `code`. Clients should switch on `code`, never on the text.
 
-```bash
-docker build -t video-service:latest .
-ruby bin/verify-image.rb
+| `code` | Status | When |
+| --- | --- | --- |
+| `invalid-value` | 400 | Validation failed; `errors` lists `field` and `message` |
+| `unauthorized` | 401 | No token, or one that cannot be verified or is not meant for this service |
+| `forbidden` | 403 | The token lacks the permission |
+| `operation-not-permitted` | 403 | A rule refused it, for example changing someone else's video |
+| `video-not-found` | 404 | |
+| `duplicate-video` | 409 | Another video already has the title |
+| `owner-not-eligible` | 422 | The user a video is to be given to does not exist or is not active |
+| `user-directory-unavailable` | 503 | user-service or auth-service could not be asked about a user |
+| `internal-error` | 500 | Anything unexpected |
+
+## Rules the service enforces
+
+Domain rules, tested without Spring:
+
+- **A title is 1 to 30 characters and no two videos share one.** A description is at most 100 characters. These limits are the ones the service had before.
+- **A video belongs to whoever adds it.** Only a video manager may add a video for someone else.
+- **Only the owner or a video manager changes, completes or removes a video.** Completing a completed video changes nothing.
+- **Videos without an owner** (the starter set) are changed only by a video manager.
+- **Only a video manager transfers a video**, even the owner cannot, and only to a user that user-service reports as active.
+
+Things to know:
+
+- Ordinary requests need no call to another service: identity and permissions come from the token. Only giving a video to another user asks user-service.
+- A revoked role or a logout takes effect here when the access token expires or is refreshed (about five minutes in dev).
+- When a user is deleted in user-service their videos keep the old owner ID; a video manager can reassign or remove them.
+
+## Architecture
+
+Clean architecture; dependencies point inward and ArchUnit fails the build if they do not.
+
+```
+com.videos
+├── domain            Pure Java. No Spring, JPA or HTTP.
+│   ├── model         Video, VideoDetails, VideoId, OwnerId, Title, VideoActor, VideoSearch, Paging, PageResult
+│   ├── port          VideoRepository, UserDirectoryPort
+│   └── exception     One type per error code
+├── application       One class per use case: CreateVideo, UpdateVideo, CompleteVideo, TransferVideo,
+│                     DeleteVideo, GetVideo, SearchVideos, SeedVideos. Depends only on domain.
+├── infrastructure
+│   ├── persistence   JPA entity and repository
+│   ├── platform      The only code that calls user-service and auth-service
+│   ├── seed          Reads the seed file and runs SeedVideos at startup
+│   └── config        Wires the use cases as beans
+└── interfaces
+    ├── rest          Controller, request and response models, problem-detail error handling
+    └── security      Filter chain, permission expressions, the caller as the domain sees them
 ```
 
-The repeatable smoke requires Docker Desktop (`host.docker.internal`) and Ruby with WEBrick/OpenSSL. It creates an isolated network and temporary PostgreSQL 18 with memory-backed data, initializes `root/root`, `videoadmin/videoadmin` and `theuser/theuser`, and supplies temporary RSA-signed JWTs via actual OIDC/JWKS decoding. Config/Vault imports and Eureka are disabled only for this smoke. Existing databases, volumes and realms are untouched; temporary containers and the network are cleaned up.
+- The domain's view of the caller, `VideoActor`, is built from the validated token: the user ID from `sub`, and whether they manage every video from the `videos:manage` permission.
+- `UserDirectoryPort` is the domain's only knowledge of users. Its adapter obtains a client-credentials token from auth-service, calls `GET /api/v1/users/{id}` on user-service through the registry, caches the token until shortly before it expires, and gets a new one once if it is refused.
+- Tokens are validated with the shared `platform-security-starter` from `micro-services`: signature against the JWKS, RS256 only, exact issuer, `video-service` in the audience, expiry with clock skew, `typ` `Bearer`.
 
-Checks cover migrations/table ownership and runtime-role sessions, JWT signature/issuer/expiry rejection, public ping/probes, ADMIN-only JSON/YAML/Swagger/diagnostics, JWT-derived video ownership despite a spoofed body owner, denied cross-user deletion/completion and persisted owner completion. Actual JSON and YAML contracts declare HTTP `bearerAuth` with JWT format and global security requirements. Public ping/probe GET operations explicitly override those requirements; catalog GET retains bearer security. Infrastructure configuration tests cover exact public paths, unchanged non-GET/private operations and absent path documents. The image passes with a read-only root filesystem, writable `/tmp`, dropped capabilities, `no-new-privileges` and a 512 MiB limit.
+## Data
 
-## Health Probes
+Database `videodb` in the platform's Postgres. Flyway owns the schema (`src/main/resources/db/migration`); Hibernate only validates it.
 
-Standalone/shared Compose use `/actuator/health/readiness` on port 9161. Readiness includes `readinessState,db` because data APIs require PostgreSQL. Liveness checks application state only. Database failure returns readiness 503 while liveness remains 200; a shared database outage may make all instances unready, so callers/ingress must handle it. Anonymous probes hide components; ADMIN can inspect them.
-
-Pool acquisition defaults to 3000 ms (`SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT`), with 1000 ms validation, to keep ordinary database-unavailable checks within the 5-second probe timeout. Hung network queries still need driver/network timeout policy. Readiness does not prove Config/Vault/Keycloak/Eureka availability.
-
-This increment is not company-platform Keycloak/audience validation, DB recovery, shared configuration/discovery, concurrent-write safety, production load or full-platform acceptance.
-## Tests
-
-```bash
-bash ./gradlew test
-bash ./gradlew integrationTest
-```
-
-PostgreSQL integration tests require Docker/Testcontainers. Current verification covers 17 unit/MVC/configuration tests, one PostgreSQL integration test and `bootJar`, plus the separate real container smoke above. Full-platform acceptance remains pending; compatibility warnings and exact evidence are recorded in the checkpoint.
-## Run Locally
-
-Choose shared dependencies (PostgreSQL 5432 / Keycloak 8080) or service-local dependencies (35432 / 38080), not both API instances on the same port. The following starts the JVM against service-local dependencies; start PostgreSQL and configure the Keycloak realm first.
-
-```bash
-export SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:35432/videodb
-export SPRING_DATASOURCE_USERNAME=theuser
-export SPRING_DATASOURCE_PASSWORD='<runtime password from local Vault/config>'
-export SPRING_FLYWAY_USER=videoadmin
-export SPRING_FLYWAY_PASSWORD='<migration password from local Vault/config>'
-export KEYCLOAK_ISSUER_URI=http://localhost:38080/realms/company-platform
-export SPRING_CLOUD_VAULT_ENABLED=false
-export SPRING_CLOUD_CONFIG_ENABLED=false
-export EUREKA_CLIENT_ENABLED=false
-export SPRING_DOCKER_COMPOSE_ENABLED=false
-bash ./gradlew bootRun
-```
-
-For externalized configuration, enable the appropriate clients and supply Vault/Config Server endpoints and credentials instead of disabling them. The configured issuer must match the token's `iss` exactly.
-
-The local Compose recipe is:
-
-```bash
-docker compose config --quiet
-docker compose up -d --build
-```
-
-It relies on the sibling `micro-services/postgres-init` initialization scripts. PostgreSQL initialization runs only for a fresh data volume; changing scripts does not repair an existing database automatically.
-
-Flyway V1 is a fresh PostgreSQL schema baseline, not an in-place migration of an old MariaDB volume. Use runtime account `theuser` and migration account `videoadmin` with the same credentials specified in local Vault/configuration across instances.
-
-## Operations And Remaining Work
-
-Check GET `/actuator/health` and the public ping endpoint for connectivity. OpenAPI is configured at `/api-docs` and Swagger UI at `/swagger-ui.html`; documentation and non-health Actuator endpoints require ADMIN. Health details are shown only to authorized administrators. A healthy process alone does not verify issuer alignment, database permissions, or the end-to-end gateway path.
-
-Fine-grained Auth Service enforcement, cross-service lifecycle events, optimistic concurrency, production deployment hardening, and full-platform smoke verification remain pending. Existing resource representations are retained for compatibility.
-
-See [platform orchestration](../micro-services/README.md), [configuration](../service-configs/README.md), and the [implementation checkpoint](../micro-services/IAM_IMPLEMENTATION_CHECKPOINT.md).
-
-## Architecture Reference
-
-```text
-video-service
-  domain/model                Video, VideoActor, VideoChanges, VideoQuery, VideoPage
-  domain/port/in              VideoCatalog use-case API
-  domain/port/out             VideoStore persistence contract
-  application/usecase         VideoCatalogService transactional business operations
-  infrastructure/web          VideosController, DTOs, facade, MapStruct mapper
-  infrastructure/persistence  JPA entity/repository, store adapter, persistence mapper
-  infrastructure/security     JWT resource-server and current actor extraction
-```
-
-Request flow:
-
-```text
-HTTP /api/videos...
-  -> SecurityConfig validates Keycloak JWT except GET public ping/health; docs/diagnostics require ADMIN
-  -> VideosController maps DTOs
-  -> VideoService facade resolves VideoActor
-  -> VideoCatalogService applies ownership and manager/admin rules
-  -> JpaVideoStore persists to tbl_video
-```
-
-## Configuration Reference
-
-| Variable | Default / role |
+| Table | Columns |
 | --- | --- |
-| `SERVER_PORT` | `9161` |
-| `SPRING_DATASOURCE_URL` | `jdbc:postgresql://localhost:5432/videodb` unless overridden |
-| `user` / `password` | Runtime DB credentials from Vault-style placeholders; local fallback `theuser` |
-| `flw-user` / `flw-password` | Flyway credentials; local fallback `videoadmin` |
-| `SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT` | Pool acquisition timeout in milliseconds, default `3000` |
-| `KEYCLOAK_ISSUER_URI` / `issuer-uri` | JWT issuer; must match token `iss` |
-| `VAULT_HOST`, `VAULT_PORT`, `VAULT_TOKEN` | Vault integration |
-| `EUREKA_CLIENT_SERVICE_URL_DEFAULT_ZONE` | Registry URL |
-| `ROOT_LOG_LEVEL`, `SPRING_SECURITY_LOG_LEVEL` | Logging verbosity |
+| `video` | `id`, `title` (unique), `description` (optional), `owner_id` (platform user ID, or null), `completed`, `created_at`, `updated_at`, `version` |
 
-## Command Reference
+| Account | Role | Used for |
+| --- | --- | --- |
+| `videoadmin` | owns the schema | Flyway migrations at startup |
+| `theuser` | reads and writes rows; cannot create, alter or drop tables | everything else |
 
-| Task | Command |
-| --- | --- |
-| Unit/MVC tests | `bash ./gradlew test` |
-| PostgreSQL integration tests | `bash ./gradlew integrationTest` |
-| Build executable JAR | `bash ./gradlew bootJar` |
-| Full verification | `bash ./gradlew clean test integrationTest bootJar` |
-| Build image | `docker build -t video-service:latest .` |
-| Health | `curl http://localhost:9161/actuator/health` |
-| Public ping | `curl http://localhost:9161/api/videos/ping` |
+The database and both accounts are created by the platform's database job with credentials read from Vault.
 
-Representative protected request:
+## Seed data
+
+`src/main/resources/data/videos.json` holds a starter set of 20 sample videos (a fixed ID, a title and a description each). The service had no seed data before; this set was written for it.
+
+- Entries go through the same domain objects as API requests, so a seed file that breaks a rule stops the service at startup instead of loading bad data.
+- Loading is safe to repeat: an entry whose ID is already stored is left alone, so later edits survive a restart.
+- Seeded videos have no owner; only a video manager can change them.
+- It runs when `videos.seed.enabled` is `true`: on in `dev`, off in `qa` and `prod` (set in `service-configs`).
+
+## Configuration
+
+Split by environment ([ADR 0014](../micro-services/docs/adr/0014-environment-profiles.md)): `application.yml` holds what is common; `application-dev.yml`, `-qa.yml` and `-prod.yml` hold the Config Server and Vault imports, optional with localhost defaults in `dev` and required elsewhere. More settings come from the Config Server (`service-configs/application*.yml` and `video-service*.yml`).
+
+| Variable | Default in `dev` | Meaning |
+| --- | --- | --- |
+| `SPRING_PROFILES_ACTIVE` | `dev` | `dev`, `qa` or `prod` |
+| `SERVER_PORT` | `9161` | HTTP port |
+| `CONFIG_SERVER_URL` | `http://localhost:9311` | Config Server |
+| `VAULT_URI`, `VAULT_TOKEN` | `http://localhost:8200`, none | Vault and this service's token |
+| `DATABASE_URL` | `jdbc:postgresql://localhost:5432/videodb` | Its database |
+| `KEYCLOAK_URL` | `http://localhost:8080` | Where it fetches signing keys |
+| `KEYCLOAK_PUBLIC_URL` | `http://localhost:8080` | The issuer in tokens; compared exactly |
+| `EUREKA_URL` | `http://localhost:9111/eureka/` | Registry |
+
+Other settings: `videos.seed.enabled`; `platform.directory.user-service-url` and `auth-service-url` (service names resolved through the registry by default), `platform.directory.load-balanced`, `connect-timeout`, `read-timeout`.
+
+No credential is in any source or configuration file of this service. From Vault:
+
+| Vault path | Keys | Written by |
+| --- | --- | --- |
+| `secret/video-service` | `spring.datasource.username`, `spring.datasource.password` (runtime account), `spring.flyway.user`, `spring.flyway.password` (schema admin) | the platform's Vault seeding job |
+| `secret/clients/video-service` | `client-secret` (for its own service token) | auth-service, when the client is registered or its secret renewed |
+
+## Dev users and passwords
+
+For the development environment only.
+
+| Account | User | Password | Where it is kept |
+| --- | --- | --- | --- |
+| `videodb` schema admin | `videoadmin` | `videoadmin` | Vault `secret/video-service` (`spring.flyway.*`) |
+| `videodb` runtime | `theuser` | `theuser` | Vault `secret/video-service` (`spring.datasource.*`) |
+| Vault dev root token | | `srikanth` | `micro-services/.env.dev.example` |
+| Platform administrator (holds every video permission) | `platform-admin` | generated; `PLATFORM_ADMIN_PASSWORD` in `micro-services/.env` | Vault `secret/keycloak` |
+| This service's Vault token | | generated; `VIDEO_SERVICE_VAULT_TOKEN` in `micro-services/.env` | |
+| This service's client secret | `video-service` | generated by auth-service | Vault `secret/clients/video-service` |
+
+There are no application users of this service's own: sign in with a platform user. The full table for the platform is in the [`micro-services` README](../micro-services/README.md#dev-users-and-passwords).
+
+## Run
+
+This repository must sit next to [`micro-services`](../micro-services/README.md), which holds the version catalog and the shared starter.
+
+**With the whole platform** (the usual way): `cd ../micro-services && make up`. video-service starts last, with books-service: after the gateway is up and the onboarding job has registered it with the platform.
+
+**From source, against the running platform:** `cd ../micro-services && scripts/run-from-source.sh video-service`
+
+**Restart just this service** after a change: `cd ../micro-services && scripts/restart.sh --build video-service`
+
+The service shuts down gracefully: on stop it finishes requests in flight (up to 30 seconds) and deregisters from Eureka.
+
+## Test
 
 ```bash
-curl -H "Authorization: Bearer $ACCESS_TOKEN" \
-  "http://localhost:9161/api/videos/filter?title=Spring&page=0&size=20"
+./gradlew build
 ```
 
-## Troubleshooting
+Needs Docker for Testcontainers. 70 tests; none are skipped.
 
-| Symptom | Likely cause |
-| --- | --- |
-| `401` | Token missing, expired, or issued by a different issuer URI. |
-| `403` | Caller is not owner/admin/manager for the requested mutation. |
-| `404` | Requested video ID does not exist. |
-| Duplicate title failure | `tbl_video.title` is unique. |
-| Startup fails before DB access | Vault/Config import is unreachable; disable clients for local standalone runs or start dependencies. |
+| Kind | Tests | Against |
+| --- | --- | --- |
+| Domain | 16 | Plain Java: value objects, ownership and completion rules |
+| Use cases | 12 | In-memory ports, including the seed loader |
+| Architecture (ArchUnit) | 7 rules | The compiled classes |
+| Repository | 7 | Postgres 18, schema from Flyway: constraints, search, paging |
+| User lookup adapter | 10 | A stand-in for auth-service and user-service over HTTP |
+| Controller (`@WebMvcTest`) | 13 | Mocked use cases: validation, error mapping, authorization |
+| Whole service | 5 | Postgres, the real seed file, tokens verified against a JWKS endpoint |
 
+The build fails if line coverage of `domain` and `application` drops below 80% (currently 100%).
 
-## JWT Audience Contract
+The end-to-end tests are in `micro-services` (`VideosE2ETest`, run with `make test-e2e`): users are created through user-service, roles assigned through auth-service, and videos are used through the gateway.
 
-Spring Boot's managed JWT decoder requires the configured issuer and the audience `company-platform-api`. Override the audience with `KEYCLOAK_API_AUDIENCE` when running locally against a different API client. A correctly signed token with a missing or different `aud` claim returns HTTP 401; realm roles do not bypass audience validation.
+## Build and image
 
-`ruby bin/verify-image.rb` checks the actual packaged application's RSA/JWKS decoder with accepted, missing and incorrect audiences, while retaining catalog, ownership, documentation and probe checks. These checks use a controlled local issuer, not genuine Keycloak realm acceptance.
+- Java 27, Gradle 9.8.0 (wrapper), Spring Boot 4.1.1. Versions come from `../micro-services/gradle/libs.versions.toml`.
+- `Dockerfile` is multi-stage: build on JDK 27, run on a JRE 27 Alpine image as a non-root user, with a health check on `/actuator/health/readiness`. It needs the platform root as a named build context, which `micro-services/docker-compose.yml` supplies:
 
-## Repository CI
+```bash
+docker build --build-context platform=../micro-services -t video-service .
+```
 
-[Build workflow](.github/workflows/build.yml) runs independently on pushes, pull requests and manual dispatch with Temurin Java 27 on Ubuntu 24.04. It verifies this repository's wrapper JAR and Gradle distribution checksum, runs `check integrationTest bootJar` with fresh tasks and Gradle deprecations treated as failures, builds the service image and retains test reports for seven days. Actions are pinned to verified commit SHAs; permissions are read-only and checkout credentials are not persisted.
-
-PostgreSQL integration tests use Docker/Testcontainers; no production database or platform credentials are required. The workflow definition passes local actionlint/structural checks, but has not run on GitHub while these changes remain uncommitted/unpushed. Image building in CI does not replace the separate runtime/probe smoke evidence recorded in the checkpoint.
+- CI (`.github/workflows/build.yml`) checks out `micro-services` next to this repository, runs `./gradlew build` and builds the image.
+- `bin/verify-image.rb` is a smoke test written for the previous implementation (its own Keycloak realm, `/api/videos/ping`, fixed passwords). It does not match this service any more and is not run by CI.
